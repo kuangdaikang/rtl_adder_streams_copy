@@ -1,0 +1,7 @@
+tmp_kernel_*
+packaged_kernel_*
+src_copy/
+Make.txt
+xrt.run_summary
+.run/
+.ipcache/
