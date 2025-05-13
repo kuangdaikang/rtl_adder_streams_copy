@@ -2,9 +2,25 @@
 #include <vector>
 #include <iostream>
 #include <cstdlib>
+#include <thread>
+#include <chrono>
+#include <fstream>
 
 #define DATA_SIZE 4096
 #define INCR_VALUE 10
+
+
+// 控制寄存器地址
+constexpr uint64_t HBM_WRITER_CTRL_BASE = 0x1c010000;
+constexpr uint32_t INTERRUPT_OFFSET = 0x04;
+
+
+// 读取 interrupt 状态寄存器（通过 OpenCL AXI-Lite buffer）
+uint32_t read_interrupt_status(cl::CommandQueue& q, cl::Buffer& ctrl_buf) {
+    uint32_t value = 0;
+    q.enqueueReadBuffer(ctrl_buf, CL_TRUE, INTERRUPT_OFFSET, sizeof(value), &value);
+    return value;
+}
 
 int main(int argc, char** argv) {
     if (argc != 2) {
@@ -34,79 +50,134 @@ int main(int argc, char** argv) {
     auto devices = xcl::get_xil_devices();
     auto fileBuf = xcl::read_binary_file(binaryFile);
     cl::Program::Binaries bins{{fileBuf.data(), fileBuf.size()}};
-
+    bool valid_device = false;
     for (unsigned int i = 0; i < devices.size(); i++) {
         auto device = devices[i];
-        context = cl::Context(device, nullptr, nullptr, nullptr, &err);
-        q = cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err);
-        program = cl::Program(context, {device}, bins, nullptr, &err);
-        if (err == CL_SUCCESS) break;
-    }
+        OCL_CHECK(err, context = cl::Context(device, nullptr, nullptr, nullptr, &err));
+        OCL_CHECK(err, q = cl::CommandQueue(context, device,
+                                            CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE, &err));
 
+        std::cout << "Trying to program device[" << i << "]: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
+        program = cl::Program(context, {device}, bins, nullptr, &err);
+        if (err != CL_SUCCESS) {
+            std::cout << "Failed to program device[" << i << "] with xclbin file!\n";
+        } else {
+            std::cout << "Device[" << i << "]: program successful!\n";
+            valid_device = true;
+            break; // we break because we found a valid device
+        }
+    }
+    if (!valid_device) {
+        std::cout << "Failed to program any device found, exit!\n";
+        exit(EXIT_FAILURE);
+    }
     // 创建内核
-    cl::Kernel krnl_input_stage(program, "krnl_input_stage_rtl", &err);
-    cl::Kernel krnl_adder_stage(program, "krnl_adder_stage_rtl", &err);
-    cl::Kernel krnl_hbm_writer(program, "hbm_writer", &err);
+    OCL_CHECK(err, cl::Kernel krnl_adder_stage(program, "krnl_adder_stage_rtl", &err));
+    OCL_CHECK(err, cl::Kernel krnl_input_stage(program, "krnl_input_stage_rtl", &err));
+    OCL_CHECK(err, cl::Kernel krnl_hbm_writer(program, "hbm_writer", &err));
 
     // 创建输入缓冲区（DDR）
-    cl::Buffer buffer_input(context,
+    OCL_CHECK(err,cl::Buffer buffer_input(context,
                             CL_MEM_USE_HOST_PTR | CL_MEM_READ_ONLY,
                             vector_size_bytes,
                             source_input.data(),
-                            &err);
+                            &err));
 
     // 创建输出缓冲区（HBM）用于 hbm_writer 写入
     cl_mem_ext_ptr_t out_ext;
-    out_ext.obj = nullptr;
+    out_ext.obj = source_hw_results.data();
     out_ext.param = 0;
-    out_ext.flags = 0 | XCL_MEM_TOPOLOGY;  // HBM[0]
+    out_ext.flags = 0 | XCL_MEM_TOPOLOGY | 0;  // 0 表示 HBM[0]
 
-    cl::Buffer buffer_output(context,
-                             CL_MEM_READ_WRITE | CL_MEM_EXT_PTR_XILINX,
-                             vector_size_bytes,
-                             &out_ext,
-                             &err);
+    OCL_CHECK(err, cl::Buffer buffer_output(context,
+                            CL_MEM_USE_HOST_PTR | CL_MEM_WRITE_ONLY | CL_MEM_EXT_PTR_XILINX,
+                            vector_size_bytes,
+                            &out_ext,
+                            &err));
 
-    // 设置内核参数
-    int size = DATA_SIZE;
-    int inc = INCR_VALUE;
 
-    // input_stage args: input buffer, size
-    krnl_input_stage.setArg(0, buffer_input);
-    krnl_input_stage.setArg(1, size);
+    // 创建控制寄存器 buffer（AXI-Lite 地址空间映射）
+    cl_mem_ext_ptr_t ctrl_ext;
+    ctrl_ext.obj = nullptr;
+    ctrl_ext.param = 0;
+    ctrl_ext.flags = HBM_WRITER_CTRL_BASE;
 
-    // adder_stage args: increment, size
-    krnl_adder_stage.setArg(0, inc);
-    krnl_adder_stage.setArg(1, size);
+    OCL_CHECK(err,cl::Buffer ctrl_buf(context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX,
+                        4096, &ctrl_ext, &err));  // 无需 reinterpret_cast
 
+
+
+    // 设置 krnl_input_stage_rtl 参数
+    OCL_CHECK(err,krnl_input_stage.setArg(0, buffer_input)); 
+    OCL_CHECK(err,krnl_input_stage.setArg(1, DATA_SIZE));
+
+    // 设置 krnl_adder_stage_rtl 参数
+    OCL_CHECK(err,krnl_adder_stage.setArg(0, INCR_VALUE));
+    OCL_CHECK(err,krnl_adder_stage.setArg(1, DATA_SIZE)); 
+
+    // 设置 hbm_writer 参数
+    uint32_t size = static_cast<uint32_t>(DATA_SIZE*4096);
+    OCL_CHECK(err, err = krnl_hbm_writer.setArg(0, buffer_output));      // gmem_addr
+    OCL_CHECK(err, err = krnl_hbm_writer.setArg(1, size));        // gmem_size
 
     // 数据迁移 input buffer 到 device
-    std::vector<cl::Memory> inBufVec = {buffer_input};
-    q.enqueueMigrateMemObjects(inBufVec, 0 /* 0 means host to device */);
+    cl::Event write_event;
+    OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_input}, 0 /* 0 means from host*/, nullptr, &write_event));
+
 
     // 启动内核（按顺序）
-    q.enqueueTask(krnl_input_stage);
-    q.enqueueTask(krnl_adder_stage);
-    q.enqueueTask(krnl_hbm_writer);
-    q.finish();
+    std::vector<cl::Event> eventVec;
+    eventVec.push_back(write_event);
+    OCL_CHECK(err, err = q.enqueueTask(krnl_input_stage, &eventVec));
+    OCL_CHECK(err, err = q.enqueueTask(krnl_adder_stage, &eventVec));
+    OCL_CHECK(err, err = q.enqueueTask(krnl_hbm_writer, &eventVec));
+
+    // 轮询中断状态
+    /*while (true) {
+        uint32_t interrupt = read_interrupt_status(q, ctrl_buf);
+        int count = 0;
+
+        if (interrupt & 0x1) {
+            std::cout << "[HOST] Interrupt detected! Pausing input and adder..." << std::endl;
+
+            // 等待中断清除
+            while (interrupt & 0x1) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                if (++count > 100) {
+                    std::cout << "[HOST] Timeout waiting for interrupt to clear." << std::endl;
+                    break;
+                }
+                interrupt = read_interrupt_status(q, ctrl_buf);
+            }
+
+            if (count <= 100) {
+                std::cout << "[HOST] Interrupt cleared. Restarting input and adder..." << std::endl;
+                q.enqueueTask(krnl_input_stage);
+                q.enqueueTask(krnl_adder_stage);
+            } else {
+                std::cout << "[HOST] Timeout occurred. Exiting..." << std::endl;
+                break;
+            }
+        }
+    }*/
+    OCL_CHECK(err, err = q.finish());
 
     // 从 HBM 读取数据回主机
-    std::vector<cl::Memory> outBufVec = {buffer_output};
-    q.enqueueMigrateMemObjects(outBufVec, CL_MIGRATE_MEM_OBJECT_HOST);
-    q.finish();
+    OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_output}, CL_MIGRATE_MEM_OBJECT_HOST));
+    OCL_CHECK(err, err = q.finish());
 
     // 验证结果
-    bool match = true;
+    int match = 0;
     for (int i = 0; i < DATA_SIZE; i++) {
         if (source_hw_results[i] != source_sw_results[i]) {
-            std::cout << "Error: Result mismatch at index " << i
-                      << ", expected " << source_sw_results[i]
-                      << ", got " << source_hw_results[i] << std::endl;
-            match = false;
+            std::cout << "Error: Result mismatch" << std::endl;
+            std::cout << "i = " << i << " CPU result = " << source_sw_results[i]
+                      << " Device result = " << source_hw_results[i] << std::endl;
+            match = 1;
             break;
         }
     }
 
-    std::cout << (match ? "TEST PASSED" : "TEST FAILED") << std::endl;
-    return match ? EXIT_SUCCESS : EXIT_FAILURE;
+    std::cout << "TEST " << (match ? "FAILED" : "PASSED") << std::endl;
+    return (match ? EXIT_FAILURE : EXIT_SUCCESS);
 }

@@ -40,6 +40,39 @@ set_property bus_type_vlnv xilinx.com:interface:acc_handshake:1.0 $ctrl_intf
 set_property sdx_kernel true [ipx::current_core]
 set_property sdx_kernel_type rtl [ipx::current_core]
 puts "KERNEL_TYPE: [get_property sdx_kernel_type [ipx::current_core]]"
+
+# 1. 获取地址块对象
+set address_block [ipx::get_address_blocks reg0 -of_objects [ipx::get_memory_maps s_axi_control -of_objects [ipx::current_core]]]
+
+# 2. 添加寄存器到地址块
+ipx::add_register gmem_addr $address_block
+ipx::add_register gmem_size $address_block
+
+# 3. 设置寄存器属性（偏移地址、位宽、访问权限）
+set_property address_offset 0x10   [ipx::get_registers gmem_addr -of_objects $address_block]
+set_property size           64     [ipx::get_registers gmem_addr -of_objects $address_block]
+set_property access         read-write [ipx::get_registers gmem_addr -of_objects $address_block]
+
+set_property address_offset 0x18   [ipx::get_registers gmem_size -of_objects $address_block]
+set_property size           32     [ipx::get_registers gmem_size -of_objects $address_block]
+set_property access         read-write [ipx::get_registers gmem_size -of_objects $address_block]
+
+# 4. 关联AXI接口与寄存器
+ipx::associate_bus_interfaces \
+  -busif m_axi_gmem \
+  -clock ap_clk \
+  [ipx::current_core]
+
+ipx::associate_bus_interfaces \
+  -busif s_axi_control \
+  -clock ap_clk \
+  [ipx::current_core]
+
+# 5. 关键：声明寄存器属于m_axi_gmem接口
+ipx::add_register_parameter ASSOCIATED_BUSIF [ipx::get_registers gmem_addr -of_objects $address_block]
+set_property value m_axi_gmem [ipx::get_register_parameters ASSOCIATED_BUSIF -of_objects [ipx::get_registers gmem_addr -of_objects $address_block]]
+
+
 ipx::check_integrity [ipx::current_core]
 ipx::save_core [ipx::current_core]
 

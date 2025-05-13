@@ -5,9 +5,8 @@ module hbm_writer_dual_axi #(
     parameter DATA_WIDTH = 512,
     parameter ADDR_WIDTH = 64,
     parameter BURST_LEN  = 16,
-    parameter [63:0] MAX_ADDR0 = 64'h1_0000_0000, // 4GB
-    parameter [63:0] MAX_ADDR1 = 64'h2_0000_0000  // 8GB
-
+    parameter [63:0] MAX_ADDR0 = 64'h8000_0000,   // 2GB
+    parameter [63:0] MAX_ADDR1 = 64'h1_0000_0000  // 4GB
 )(
     input wire ap_clk,
     input wire ap_rst_n,
@@ -37,150 +36,112 @@ module hbm_writer_dual_axi #(
     output reg write0_done,
     output reg write1_done,
 
-    // AXI Master 0 interface
-    output reg [ADDR_WIDTH-1:0] m_axi_gmem0_AWADDR,
-    output reg [7:0]            m_axi_gmem0_AWLEN,
-    output reg                  m_axi_gmem0_AWVALID,
-    input  wire                 m_axi_gmem0_AWREADY,
+    // AXI Master interface
+    output reg [ADDR_WIDTH-1:0] m_axi_gmem_AWADDR,
+    output reg [7:0]            m_axi_gmem_AWLEN,
+    output reg                  m_axi_gmem_AWVALID,
+    input  wire                 m_axi_gmem_AWREADY,
 
-    output reg [DATA_WIDTH-1:0] m_axi_gmem0_WDATA,
-    output reg                  m_axi_gmem0_WVALID,
-    output reg                  m_axi_gmem0_WLAST,
-    input  wire                 m_axi_gmem0_WREADY,
-
-    // AXI Master 1 interface
-    output reg [ADDR_WIDTH-1:0] m_axi_gmem1_AWADDR,
-    output reg [7:0]            m_axi_gmem1_AWLEN,
-    output reg                  m_axi_gmem1_AWVALID,
-    input  wire                 m_axi_gmem1_AWREADY,
-
-    output reg [DATA_WIDTH-1:0] m_axi_gmem1_WDATA,
-    output reg                  m_axi_gmem1_WVALID,
-    output reg                  m_axi_gmem1_WLAST,
-    input  wire                 m_axi_gmem1_WREADY
+    output reg [DATA_WIDTH-1:0] m_axi_gmem_WDATA,
+    output reg                  m_axi_gmem_WVALID,
+    output reg                  m_axi_gmem_WLAST,
+    input  wire                 m_axi_gmem_WREADY,
+    input  wire                 m_axi_gmem_BVALID,
+    output reg                  m_axi_gmem_BREADY
 
 );
 
-    localparam IDLE  = 1'b0;
-    localparam WRITE = 1'b1;
+    localparam IDLE        = 2'b00;
+    localparam WRITE       = 2'b01;
+    localparam WAIT_BRESP  = 2'b10;
 
-    reg state0, state1;
-    reg [$clog2(BURST_LEN):0] write_cnt0, write_cnt1;
+    reg state;
+    reg [$clog2(BURST_LEN):0] write_cnt;
+    reg is_bank0;
 
-    // FSM for bank 0
+    // FSM for bank 0 and bank 1
     always @(posedge ap_clk or negedge ap_rst_n) begin
-        if (!ap_rst_n) begin
-            state0 <= IDLE;
-            m_axi_gmem0_AWVALID <= 0;
-            m_axi_gmem0_AWADDR  <= 0;
-            m_axi_gmem0_AWLEN   <= 0;
-            m_axi_gmem0_WVALID  <= 0;
-            m_axi_gmem0_WDATA   <= 0;
-            m_axi_gmem0_WLAST   <= 0;
-            // fifo0_rd_en         <= 0;
-            current_addr0       <= 0;
-            write_cnt0          <= 0;
-            write0_done     <= 0;
-            bank0_full          <= 0;
-        end else begin
-            // fifo0_rd_en         <= 0;
-            m_axi_gmem0_WVALID  <= 0;
-            m_axi_gmem0_WLAST   <= 0;
+    if (!ap_rst_n) begin
+        state <= IDLE;
+        m_axi_gmem_AWVALID <= 0;
+        m_axi_gmem_AWADDR  <= 0;
+        m_axi_gmem_AWLEN   <= 0;
+        m_axi_gmem_WVALID  <= 0;
+        m_axi_gmem_WDATA   <= 0;
+        m_axi_gmem_WLAST   <= 0;
+        m_axi_gmem_BREADY  <= 0;
+        current_addr0      <= 0;
+        current_addr1      <= 64'h8000_0000;
+        write_cnt          <= 0;
+        write0_done        <= 0;
+        write1_done        <= 0;
+        bank0_full         <= 0;
+        bank1_full         <= 0;
+        is_bank0           <= 1;
+    end else begin
+        m_axi_gmem_WVALID <= 0;
+        m_axi_gmem_WLAST  <= 0;
+        m_axi_gmem_BREADY <= 0;  // 默认不拉高
 
-            case (state0)
-                IDLE: begin
-                    if (bank0_wr_en) begin
-                        m_axi_gmem0_AWADDR  <= start_addr0;
-                        m_axi_gmem0_AWLEN   <= BURST_LEN - 1;
-                        m_axi_gmem0_AWVALID <= 1;
-                        write_cnt0          <= 0;
-                        state0              <= WRITE;
-                        write0_done     <= 0;
+        case (state)
+            IDLE: begin
+                if (bank0_wr_en) begin
+                    is_bank0 <= 1;
+                    m_axi_gmem_AWADDR  <= start_addr0;
+                    m_axi_gmem_AWLEN   <= BURST_LEN - 1;
+                    m_axi_gmem_AWVALID <= 1;
+                    write_cnt          <= 0;
+                    state              <= WRITE;
+                    write0_done        <= 0;
+                end else if (bank1_wr_en) begin
+                    is_bank0 <= 0;
+                    m_axi_gmem_AWADDR  <= start_addr1;
+                    m_axi_gmem_AWLEN   <= BURST_LEN - 1;
+                    m_axi_gmem_AWVALID <= 1;
+                    write_cnt          <= 0;
+                    state              <= WRITE;
+                    write1_done        <= 0;
+                end
+            end
+
+            WRITE: begin
+                if (m_axi_gmem_AWVALID && m_axi_gmem_AWREADY)
+                    m_axi_gmem_AWVALID <= 0;
+
+                if (m_axi_gmem_WREADY) begin
+                    m_axi_gmem_WVALID <= 1;
+                    m_axi_gmem_WLAST  <= (write_cnt == BURST_LEN - 1);
+                    m_axi_gmem_WDATA  <= write_data;
+
+                    write_cnt <= write_cnt + 1;
+
+                    if (write_cnt == BURST_LEN - 1) begin
+                        state <= WAIT_BRESP;  // 写完数据后等待写响应
                     end
                 end
-                WRITE: begin
-                    if (m_axi_gmem0_AWVALID && m_axi_gmem0_AWREADY)
-                        m_axi_gmem0_AWVALID <= 0;
+            end
 
-                    if (m_axi_gmem0_WREADY) begin
-                        m_axi_gmem0_WVALID <= 1;
-                        m_axi_gmem0_WDATA  <= write_data;
-                        // fifo0_rd_en        <= 1;
+            WAIT_BRESP: begin
+                if (m_axi_gmem_BVALID) begin
+                    m_axi_gmem_BREADY <= 1;  // 拉高 BREADY 一拍
 
-                        if (write_cnt0 == BURST_LEN - 1) begin
-                            m_axi_gmem0_WLAST <= 1;
-                            current_addr0     <= start_addr0 + BURST_LEN * (DATA_WIDTH/8);
-                            write0_done     <= 1;
-                            if (start_addr0+2*BURST_LEN * (DATA_WIDTH/8) >= MAX_ADDR0) begin
-                                bank0_full <= 1;
-                            end else begin
-                                bank0_full <= 0;
-                            end
-                            state0            <= IDLE;
-                        end
-                        write_cnt0 <= write_cnt0 + 1;
+                    // 更新地址和状态
+                    if (is_bank0) begin
+                        current_addr0  <= start_addr0 + BURST_LEN * (DATA_WIDTH/8);
+                        write0_done    <= 1;
+                        bank0_full     <= (start_addr0 + 2*BURST_LEN*(DATA_WIDTH/8) >= MAX_ADDR0);
+                    end else begin
+                        current_addr1  <= start_addr1 + BURST_LEN * (DATA_WIDTH/8);
+                        write1_done    <= 1;
+                        bank1_full     <= (start_addr1 + 2*BURST_LEN*(DATA_WIDTH/8) >= MAX_ADDR1);
                     end
+
+                    state <= IDLE;
                 end
-            endcase
-        end
+            end
+        endcase
     end
+end
 
-    // FSM for bank 1
-    always @(posedge ap_clk or negedge ap_rst_n) begin
-        if (!ap_rst_n) begin
-            state1 <= IDLE;
-            m_axi_gmem1_AWVALID <= 0;
-            m_axi_gmem1_AWADDR  <= 0;
-            m_axi_gmem1_AWLEN   <= 0;
-            m_axi_gmem1_WVALID  <= 0;
-            m_axi_gmem1_WDATA   <= 0;
-            m_axi_gmem1_WLAST   <= 0;
-            // fifo1_rd_en         <= 0;
-            current_addr1       <= 32'h0100_0000;
-            write1_done     <= 0;
-            bank1_full          <= 0;
-            write_cnt1          <= 0;
-        end else begin
-            // fifo1_rd_en         <= 0;
-            m_axi_gmem1_WVALID  <= 0;
-            m_axi_gmem1_WLAST   <= 0;
-
-            case (state1)
-                IDLE: begin
-                    if (bank1_wr_en) begin
-                        m_axi_gmem1_AWADDR  <= start_addr1;
-                        m_axi_gmem1_AWLEN   <= BURST_LEN - 1;
-                        m_axi_gmem1_AWVALID <= 1;
-                        write_cnt1          <= 0;
-                        state1              <= WRITE;
-                        write1_done     <= 0;
-                    end
-                end
-                WRITE: begin
-                    if (m_axi_gmem1_AWVALID && m_axi_gmem1_AWREADY)
-                        m_axi_gmem1_AWVALID <= 0;
-
-                    if (m_axi_gmem1_WREADY) begin
-                        m_axi_gmem1_WVALID <= 1;
-                        m_axi_gmem1_WDATA  <= write_data;
-                        // fifo1_rd_en        <= 1;
-
-                        if (write_cnt1 == BURST_LEN - 1) begin
-                            m_axi_gmem1_WLAST <= 1;
-                            current_addr1     <= start_addr1 + BURST_LEN * (DATA_WIDTH/8);
-                            write1_done     <= 1;
-                            if (start_addr1+2*BURST_LEN * (DATA_WIDTH/8) >= MAX_ADDR1) begin
-                                bank1_full <= 1;
-                            end else begin
-                                bank1_full <= 0;
-                            end
-                            state1            <= IDLE;
-                        end
-                        write_cnt1 <= write_cnt1 + 1;
-                    end
-                end
-            endcase
-        end
-    end
 
 endmodule

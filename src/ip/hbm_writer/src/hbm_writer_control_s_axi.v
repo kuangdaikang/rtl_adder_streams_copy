@@ -1,207 +1,160 @@
-`timescale 1ns/1ps
 `default_nettype none
+`timescale 1 ns / 1 ps
 
-module hbm_writer_control_s_axi #(
-    parameter ADDR_WIDTH = 6,
-    parameter DATA_WIDTH = 32
-)(
-    input  wire                   ACLK,
-    input  wire                   ARESET,
-    input  wire                   ACLK_EN,
+module hbm_writer_control_s_axi (
+    input  wire        ACLK,
+    input  wire        ARESET,
+    input  wire        ACLK_EN,
 
-    // Write address channel
-    input  wire [ADDR_WIDTH-1:0]  AWADDR,
-    input  wire                   AWVALID,
-    output wire                   AWREADY,
+    // AXI Write Address Channel
+    input  wire [5:0]  AWADDR,
+    input  wire        AWVALID,
+    output wire        AWREADY,
 
-    // Write data channel
-    input  wire [DATA_WIDTH-1:0]  WDATA,
-    input  wire [DATA_WIDTH/8-1:0] WSTRB,
-    input  wire                   WVALID,
-    output wire                   WREADY,
+    // AXI Write Data Channel
+    input  wire [31:0] WDATA,
+    input  wire [3:0]  WSTRB,
+    input  wire        WVALID,
+    output wire        WREADY,
 
-    // Write response channel
-    output wire [1:0]             BRESP,
-    output wire                   BVALID,
-    input  wire                   BREADY,
+    // AXI Write Response Channel
+    output wire [1:0]  BRESP,
+    output wire        BVALID,
+    input  wire        BREADY,
 
-    // Read address channel
-    input  wire [ADDR_WIDTH-1:0]  ARADDR,
-    input  wire                   ARVALID,
-    output wire                   ARREADY,
+    // AXI Read Address Channel
+    input  wire [5:0]  ARADDR,
+    input  wire        ARVALID,
+    output wire        ARREADY,
 
-    // Read data channel
-    output wire [DATA_WIDTH-1:0]  RDATA,
-    output wire [1:0]             RRESP,
-    output wire                   RVALID,
-    input  wire                   RREADY,
+    // AXI Read Data Channel
+    output wire [31:0] RDATA,
+    output wire [1:0]  RRESP,
+    output wire        RVALID,
+    input  wire        RREADY,
 
-    // User logic control
-    output wire                   ap_start,
-    input  wire                   ap_done,
-    input  wire                   ap_idle,
-    input  wire                   ap_ready,
-    output wire                   interrupt
+    // Control Signals
+    output reg         ap_start,
+    input  wire        ap_done,
+    input  wire        ap_idle,
+    input  wire        ap_ready,
+    input  wire        interrupt,
+
+    output reg [63:0] gmem_addr,
+    output reg [31:0] gmem_size
+
 );
 
-    // 地址定义
-    localparam ADDR_AP_CTRL = 6'h00;
-    localparam ADDR_GIE     = 6'h04;
-    localparam ADDR_IER     = 6'h08;
-    localparam ADDR_ISR     = 6'h0C;
+    // AXI Write FSM
+    reg awready_reg, wready_reg, bvalid_reg;
+    reg [1:0] bresp_reg;
+    reg [5:0] awaddr_reg;
 
-    // 状态机状态
-    localparam WRIDLE = 2'd0, WRDATA = 2'd1, WRRESP = 2'd2;
-    localparam RDIDLE = 2'd0, RDDATA = 2'd1;
+    assign AWREADY = awready_reg;
+    assign WREADY  = wready_reg;
+    assign BRESP   = bresp_reg;
+    assign BVALID  = bvalid_reg;
 
-    // 写通道信号
-    reg [1:0] wstate, wnext;
-    reg [ADDR_WIDTH-1:0] waddr;
-    wire [DATA_WIDTH-1:0] wmask;
-    wire aw_hs = AWVALID & AWREADY;
-    wire w_hs  = WVALID & WREADY;
+    // AXI Read FSM
+    reg arready_reg, rvalid_reg;
+    reg [31:0] rdata_reg;
+    reg [1:0]  rresp_reg;
+    reg [5:0]  araddr_reg;
 
-    // 读通道信号
-    reg [1:0] rstate, rnext;
-    reg [DATA_WIDTH-1:0] rdata;
-    wire ar_hs = ARVALID & ARREADY;
-    wire [ADDR_WIDTH-1:0] raddr = ARADDR;
+    assign ARREADY = arready_reg;
+    assign RVALID  = rvalid_reg;
+    assign RDATA   = rdata_reg;
+    assign RRESP   = rresp_reg;
 
-    // 寄存器
-    reg int_ap_start = 0;
-    reg int_ap_done = 0;
-    reg int_gie = 0;
-    reg [1:0] int_ier = 0;
-    reg [1:0] int_isr = 0;
+    // Internal registers
+    reg ap_start_reg;
 
-    assign ap_start = int_ap_start;
-    assign interrupt = int_gie & (|int_isr);
+    always @(posedge ACLK or posedge ARESET) begin
+        if (ARESET) begin
+            awready_reg <= 1'b0;
+            wready_reg  <= 1'b0;
+            bvalid_reg  <= 1'b0;
+            bresp_reg   <= 2'b00;
+            awaddr_reg  <= 6'd0;
+            ap_start    <= 1'b0;
+            gmem_addr   <= 64'd0;
+            gmem_size   <= 32'd0;
+        end else if (ACLK_EN) begin
+            // Write Address
+            if (!awready_reg && AWVALID) begin
+                awready_reg <= 1'b1;
+                awaddr_reg  <= AWADDR;
+            end else begin
+                awready_reg <= 1'b0;
+            end
 
-    // 写状态机
-    assign AWREADY = (wstate == WRIDLE);
-    assign WREADY  = (wstate == WRDATA);
-    assign BRESP   = 2'b00;
-    assign BVALID  = (wstate == WRRESP);
-    assign wmask   = { {8{WSTRB[3]}}, {8{WSTRB[2]}}, {8{WSTRB[1]}}, {8{WSTRB[0]}} };
+            // Write Data
+            if (!wready_reg && WVALID) begin
+                wready_reg <= 1'b1;
+            end else begin
+                wready_reg <= 1'b0;
+            end
 
-    always @(posedge ACLK) begin
-        if (ARESET)
-            wstate <= WRIDLE;
-        else if (ACLK_EN)
-            wstate <= wnext;
-    end
+            // Write Response
+            if (awready_reg && wready_reg && !bvalid_reg) begin
+                bvalid_reg <= 1'b1;
+                bresp_reg  <= 2'b00;
 
-    always @(*) begin
-        case (wstate)
-            WRIDLE: wnext = AWVALID ? WRDATA : WRIDLE;
-            WRDATA: wnext = WVALID  ? WRRESP : WRDATA;
-            WRRESP: wnext = BREADY  ? WRIDLE : WRRESP;
-            default: wnext = WRIDLE;
-        endcase
-    end
-
-    always @(posedge ACLK) begin
-        if (ACLK_EN && aw_hs)
-            waddr <= AWADDR;
-    end
-
-    // 读状态机
-    assign ARREADY = (rstate == RDIDLE);
-    assign RDATA   = rdata;
-    assign RRESP   = 2'b00;
-    assign RVALID  = (rstate == RDDATA);
-
-    always @(posedge ACLK) begin
-        if (ARESET)
-            rstate <= RDIDLE;
-        else if (ACLK_EN)
-            rstate <= rnext;
-    end
-
-    always @(*) begin
-        case (rstate)
-            RDIDLE: rnext = ARVALID ? RDDATA : RDIDLE;
-            RDDATA: rnext = RREADY  ? RDIDLE : RDDATA;
-            default: rnext = RDIDLE;
-        endcase
-    end
-
-    always @(posedge ACLK) begin
-        if (ACLK_EN && ar_hs) begin
-            case (raddr)
-                ADDR_AP_CTRL: rdata <= {24'd0, 4'd0, ap_ready, ap_idle, int_ap_done, int_ap_start};
-                ADDR_GIE    : rdata <= {31'd0, int_gie};
-                ADDR_IER    : rdata <= {30'd0, int_ier};
-                ADDR_ISR    : rdata <= {30'd0, int_isr};
-                default     : rdata <= 0;
-            endcase
+                // Decode register write
+                case (awaddr_reg)
+                    6'h00: if (WSTRB[0]) ap_start <= WDATA[0];
+                    6'h10: gmem_addr[31:0]  <= WDATA;
+                    6'h14: gmem_addr[63:32] <= WDATA;
+                    6'h18: gmem_size        <= WDATA;
+                endcase
+            end else if (BREADY && bvalid_reg) begin
+                bvalid_reg <= 1'b0;
+            end
         end
     end
 
-    // ap_start 控制
-    always @(posedge ACLK) begin
-        if (ARESET)
-            int_ap_start <= 0;
-        else if (ACLK_EN) begin
-            if (w_hs && waddr == ADDR_AP_CTRL && WSTRB[0])
-                int_ap_start <= WDATA[0];
-            else if (ap_ready)
-                int_ap_start <= 0;
-        end
-    end
-
-    // ap_done 清除
-    always @(posedge ACLK) begin
-        if (ARESET)
-            int_ap_done <= 0;
-        else if (ACLK_EN) begin
+    // Clear ap_start when ap_done is asserted
+    always @(posedge ACLK or posedge ARESET) begin
+        if (ARESET) begin
+            ap_start <= 1'b0;
+        end else if (ACLK_EN) begin
             if (ap_done)
-                int_ap_done <= 1;
-            else if (ar_hs && raddr == ADDR_AP_CTRL)
-                int_ap_done <= 0;
+                ap_start <= 1'b0;
         end
     end
 
-    // GIE
-    always @(posedge ACLK) begin
-        if (ARESET)
-            int_gie <= 0;
-        else if (ACLK_EN && w_hs && waddr == ADDR_GIE && WSTRB[0])
-            int_gie <= WDATA[0];
-    end
+    // Read FSM
+    always @(posedge ACLK or posedge ARESET) begin
+        if (ARESET) begin
+            arready_reg <= 1'b0;
+            rvalid_reg  <= 1'b0;
+            rdata_reg   <= 32'd0;
+            rresp_reg   <= 2'b00;
+            araddr_reg  <= 6'd0;
+        end else if (ACLK_EN) begin
+            // Accept read address
+            if (!arready_reg && ARVALID) begin
+                arready_reg <= 1'b1;
+                araddr_reg  <= ARADDR;
+            end else begin
+                arready_reg <= 1'b0;
+            end
 
-    // IER
-    always @(posedge ACLK) begin
-        if (ARESET)
-            int_ier <= 0;
-        else if (ACLK_EN && w_hs && waddr == ADDR_IER && WSTRB[0])
-            int_ier <= WDATA[1:0];
-    end
-
-    // ISR[0] - ap_done
-    always @(posedge ACLK) begin
-        if (ARESET)
-            int_isr[0] <= 0;
-        else if (ACLK_EN) begin
-            if (int_ier[0] & ap_done)
-                int_isr[0] <= 1;
-            else if (w_hs && waddr == ADDR_ISR && WSTRB[0])
-                int_isr[0] <= int_isr[0] ^ WDATA[0];
-        end
-    end
-
-    // ISR[1] - ap_ready
-    always @(posedge ACLK) begin
-        if (ARESET)
-            int_isr[1] <= 0;
-        else if (ACLK_EN) begin
-            if (int_ier[1] & ap_ready)
-                int_isr[1] <= 1;
-            else if (w_hs && waddr == ADDR_ISR && WSTRB[0])
-                int_isr[1] <= int_isr[1] ^ WDATA[1];
+            // Output read data
+            if (arready_reg && !rvalid_reg) begin
+                rvalid_reg <= 1'b1;
+                case (araddr_reg)
+                    6'h00: rdata_reg <= {28'd0, ap_ready, ap_idle, ap_done, ap_start};
+                    6'h04: rdata_reg <= {31'd0, interrupt};
+                    6'h10: rdata_reg <= gmem_addr[31:0];
+                    6'h14: rdata_reg <= gmem_addr[63:32];
+                    6'h18: rdata_reg <= gmem_size;
+                    default: rdata_reg <= 32'd0;
+                endcase
+            end else if (rvalid_reg && RREADY) begin
+                rvalid_reg <= 1'b0;
+            end
         end
     end
 
 endmodule
-
-`default_nettype wire

@@ -6,7 +6,7 @@ module hbm_writer #(
     parameter C_M_AXI_GMEM_ADDR_WIDTH = 64
 )(
     // Clock and Reset
-    (* X_INTERFACE_PARAMETER = "FREQ_HZ=300000000, ASSOCIATED_BUSIF=p0:m_axi_gmem0:m_axi_gmem1:s_axi_control, ASSOCIATED_RESET=ap_rst_n" *)
+    (* X_INTERFACE_PARAMETER = "FREQ_HZ=300000000, ASSOCIATED_BUSIF=p0:m_axi_gmem:s_axi_control, ASSOCIATED_RESET=ap_rst_n" *)
     (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 ap_clk CLK" *)
     input  wire ap_clk,
 
@@ -50,7 +50,7 @@ module hbm_writer #(
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 s_axi_control RREADY" *)
     input  wire        s_axi_control_RREADY,
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 s_axi_control" *)
-    (* X_INTERFACE_PARAMETER = "DATA_WIDTH=32, ADDR_WIDTH=6, HAS_BURST=0, HAS_LOCK=0, HAS_PROT=0, HAS_CACHE=0, HAS_QOS=0, HAS_REGION=0, HAS_WSTRB=1, HAS_BRESP=1, HAS_RRESP=1, SUPPORTS_NARROW_BURST=0" *)
+    (* X_INTERFACE_PARAMETER = "XIL_INTERFACENAME=s_axi_control, PROTOCOL=AXI4LITE, DATA_WIDTH=32, ADDR_WIDTH=32, HAS_BURST=0, HAS_LOCK=0, HAS_PROT=1, HAS_CACHE=0, HAS_QOS=0, HAS_REGION=0, HAS_WSTRB=1, HAS_BRESP=1, HAS_RRESP=1" *)
 
     // ap_ctrl_hs control signals
     (* X_INTERFACE_INFO = "xilinx.com:interface:acc_handshake:1.0 control ap_start" *)
@@ -78,42 +78,52 @@ module hbm_writer #(
     (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 p0 TKEEP" *)
     input  wire [(C_M_AXI_GMEM_DATA_WIDTH/8)-1:0] p0_TKEEP,
 
-    // AXI Master Interface for HBM Bank 0
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 AWADDR" *)
-    output wire [C_M_AXI_GMEM_ADDR_WIDTH-1:0]  m_axi_gmem0_AWADDR,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 AWVALID" *)
-    output wire                                m_axi_gmem0_AWVALID,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 AWREADY" *)
-    input  wire                                m_axi_gmem0_AWREADY,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 WDATA" *)
-    output wire [C_M_AXI_GMEM_DATA_WIDTH-1:0]  m_axi_gmem0_WDATA,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 WVALID" *)
-    output wire                                m_axi_gmem0_WVALID,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 WREADY" *)
-    input  wire                                m_axi_gmem0_WREADY,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 WLAST" *)
-    output wire                                m_axi_gmem0_WLAST,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem0 AWLEN" *)
-    output wire [7:0]                           m_axi_gmem0_AWLEN,
-
-    // AXI Master Interface for HBM Bank 1
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 AWADDR" *)
-    output wire [C_M_AXI_GMEM_ADDR_WIDTH-1:0]  m_axi_gmem1_AWADDR,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 AWVALID" *)
-    output wire                                m_axi_gmem1_AWVALID,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 AWREADY" *)
-    input  wire                                m_axi_gmem1_AWREADY,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 WDATA" *)
-    output wire [C_M_AXI_GMEM_DATA_WIDTH-1:0]  m_axi_gmem1_WDATA,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 WVALID" *)
-    output wire                                m_axi_gmem1_WVALID,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 WREADY" *)
-    input  wire                                m_axi_gmem1_WREADY,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 WLAST" *)
-    output wire                                m_axi_gmem1_WLAST,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem1 AWLEN" *)
-    output wire [7:0]                           m_axi_gmem1_AWLEN
+    // AXI Master Interface for HBM
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem AWADDR" *)
+    (* X_INTERFACE_PARAMETER = "XIL_INTERFACENAME m_axi_gmem, ASSOCIATED_CONTROL=s_axi_control, DATA_WIDTH=512, PROTOCOL=AXI4, FREQ_HZ=300000000, ID_WIDTH=0, ADDR_WIDTH=64, HAS_BURST=1, HAS_LOCK=0, HAS_PROT=0, HAS_CACHE=0, HAS_QOS=0, HAS_REGION=0, HAS_WSTRB=1, HAS_BRESP=1, HAS_RRESP=1, SUPPORTS_NARROW_BURST=0" *)
+    output wire [C_M_AXI_GMEM_ADDR_WIDTH-1:0]  m_axi_gmem_AWADDR,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem AWVALID" *)
+    output wire                                m_axi_gmem_AWVALID,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem AWREADY" *)
+    input  wire                                m_axi_gmem_AWREADY,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem WDATA" *)
+    output wire [C_M_AXI_GMEM_DATA_WIDTH-1:0]  m_axi_gmem_WDATA,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem WVALID" *)
+    output wire                                m_axi_gmem_WVALID,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem WREADY" *)
+    input  wire                                m_axi_gmem_WREADY,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem WLAST" *)
+    output wire                                m_axi_gmem_WLAST,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem AWLEN" *)
+    output wire [7:0]                           m_axi_gmem_AWLEN,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem BVALID" *)
+    input  wire                                 m_axi_gmem_BVALID,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem BREADY" *)
+    output wire                                 m_axi_gmem_BREADY,
+    //axi 读通道
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem ARADDR" *)
+    output wire [C_M_AXI_GMEM_ADDR_WIDTH-1:0] m_axi_gmem_ARADDR,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem ARVALID" *)
+    output wire                              m_axi_gmem_ARVALID,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem ARREADY" *)
+    input  wire                              m_axi_gmem_ARREADY,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem RDATA" *)
+    input  wire [C_M_AXI_GMEM_DATA_WIDTH-1:0] m_axi_gmem_RDATA,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem RVALID" *)
+    input  wire                              m_axi_gmem_RVALID,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem RREADY" *)
+    output wire                              m_axi_gmem_RREADY,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem RLAST" *)
+    input  wire                              m_axi_gmem_RLAST,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem ARLEN" *)
+    output wire [7:0]                        m_axi_gmem_ARLEN
 );
+
+    assign m_axi_gmem_ARADDR  = 64'd0;
+    assign m_axi_gmem_ARVALID = 1'b0;
+    assign m_axi_gmem_ARLEN   = 8'd0;
+    assign m_axi_gmem_RREADY  = 1'b0;
+
 
     // 控制状态机：ap_ctrl_hs 实现
     reg ap_done_reg = 1'b0;
@@ -183,8 +193,10 @@ module hbm_writer #(
 
     always @(posedge ap_clk or negedge ap_rst_n) begin
         if (!ap_rst_n) begin
+            saved_addr0 <= gmem_addr;           // 从控制接口获取初始地址
+            saved_addr1 <= gmem_addr + 64'h1000; // 动态计算第二地址
             saved_addr0 <= 0;
-            saved_addr1 <= 64'h1_0000_0000;
+            saved_addr1 <= 64'h8000_0000;
         end else begin
             if (write0_done)
                 saved_addr0 <= current_addr0;
@@ -193,13 +205,16 @@ module hbm_writer #(
         end
     end
 
+    wire [63:0] gmem_addr;
+    wire [31:0] gmem_size;
+
     // 子模块实例化
     hbm_writer_dual_axi #(
         .DATA_WIDTH(C_M_AXI_GMEM_DATA_WIDTH),
         .ADDR_WIDTH(C_M_AXI_GMEM_ADDR_WIDTH),
         .BURST_LEN(16),
-        .MAX_ADDR0(64'h1_0000_0000),
-        .MAX_ADDR1(64'h2_0000_0000)
+        .MAX_ADDR0(64'h8000_0000),
+        .MAX_ADDR1(64'h1_0000_0000)
     ) writer_inst (
         .ap_clk(ap_clk),
         .ap_rst_n(ap_rst_n),
@@ -217,23 +232,16 @@ module hbm_writer #(
         .write0_done(write0_done),
         .write1_done(write1_done),
 
-        .m_axi_gmem0_AWADDR(m_axi_gmem0_AWADDR),
-        .m_axi_gmem0_AWVALID(m_axi_gmem0_AWVALID),
-        .m_axi_gmem0_AWREADY(m_axi_gmem0_AWREADY),
-        .m_axi_gmem0_WDATA(m_axi_gmem0_WDATA),
-        .m_axi_gmem0_WVALID(m_axi_gmem0_WVALID),
-        .m_axi_gmem0_WREADY(m_axi_gmem0_WREADY),
-        .m_axi_gmem0_WLAST(m_axi_gmem0_WLAST),
-        .m_axi_gmem0_AWLEN(m_axi_gmem0_AWLEN),
-
-        .m_axi_gmem1_AWADDR(m_axi_gmem1_AWADDR),
-        .m_axi_gmem1_AWVALID(m_axi_gmem1_AWVALID),
-        .m_axi_gmem1_AWREADY(m_axi_gmem1_AWREADY),
-        .m_axi_gmem1_WDATA(m_axi_gmem1_WDATA),
-        .m_axi_gmem1_WVALID(m_axi_gmem1_WVALID),
-        .m_axi_gmem1_WREADY(m_axi_gmem1_WREADY),
-        .m_axi_gmem1_WLAST(m_axi_gmem1_WLAST),
-        .m_axi_gmem1_AWLEN(m_axi_gmem1_AWLEN)
+        .m_axi_gmem_AWADDR(m_axi_gmem_AWADDR),
+        .m_axi_gmem_AWVALID(m_axi_gmem_AWVALID),
+        .m_axi_gmem_AWREADY(m_axi_gmem_AWREADY),
+        .m_axi_gmem_WDATA(m_axi_gmem_WDATA),
+        .m_axi_gmem_WVALID(m_axi_gmem_WVALID),
+        .m_axi_gmem_WREADY(m_axi_gmem_WREADY),
+        .m_axi_gmem_WLAST(m_axi_gmem_WLAST),
+        .m_axi_gmem_AWLEN(m_axi_gmem_AWLEN),
+        .m_axi_gmem_BVALID(m_axi_gmem_BVALID),
+        .m_axi_gmem_BREADY(m_axi_gmem_BREADY)
 
         // .interrupt(interrupt)
     );
@@ -265,8 +273,10 @@ module hbm_writer #(
     .ap_start(ap_start),
     .ap_done(ap_done),
     .ap_idle(ap_idle),
-    .ap_ready(ap_ready)
-    // .interrupt(interrupt)
+    .ap_ready(ap_ready),
+    .interrupt(interrupt),
+    .gmem_addr(gmem_addr),
+    .gmem_size(gmem_size)
     );
 
 
