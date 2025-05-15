@@ -2,11 +2,12 @@
 `timescale 1 ns / 1 ps 
 
 module hbm_writer_dual_axi #(
-    parameter DATA_WIDTH = 512,
+    parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 64,
     parameter BURST_LEN  = 16,
-    parameter [63:0] MAX_ADDR0 = 64'h8000_0000,   // 2GB
-    parameter [63:0] MAX_ADDR1 = 64'h1_0000_0000  // 4GB
+    parameter [63:0] MAX_ADDR0 = 64'h0800_0000,   // 128MB
+    parameter [63:0] MAX_ADDR1 = 64'h1000_0000    // 256MB
+
 )(
     input wire ap_clk,
     input wire ap_rst_n,
@@ -71,7 +72,7 @@ module hbm_writer_dual_axi #(
         m_axi_gmem_WLAST   <= 0;
         m_axi_gmem_BREADY  <= 0;
         current_addr0      <= 0;
-        current_addr1      <= 64'h8000_0000;
+        current_addr1      <= 64'h0800_0000;
         write_cnt          <= 0;
         write0_done        <= 0;
         write1_done        <= 0;

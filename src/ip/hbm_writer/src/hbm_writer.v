@@ -2,7 +2,7 @@
 `timescale 1 ns / 1 ps
 
 module hbm_writer #(
-    parameter C_M_AXI_GMEM_DATA_WIDTH = 512,
+    parameter C_M_AXI_GMEM_DATA_WIDTH = 32,
     parameter C_M_AXI_GMEM_ADDR_WIDTH = 64
 )(
     // Clock and Reset
@@ -73,10 +73,6 @@ module hbm_writer #(
     input  wire                                p0_TVALID,
     (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 p0 TREADY" *)
     output wire                                p0_TREADY,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 p0 TLAST" *)
-    input  wire                                p0_TLAST,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 p0 TKEEP" *)
-    input  wire [(C_M_AXI_GMEM_DATA_WIDTH/8)-1:0] p0_TKEEP,
 
     // AXI Master Interface for HBM
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi_gmem AWADDR" *)
@@ -160,7 +156,10 @@ module hbm_writer #(
                     end
                 end
                 S_RUN: begin            //现在的想法是writer核只要启动了就一直run,done state不知道是否有用，先保留
-                    
+                    ap_ready_reg <= 1'b1; // 表示 kernel 已准备好
+                    ap_done_reg  <= 1'b0;
+                    ap_idle_reg  <= 1'b0;
+
                 end
                 S_DONE: begin
                     if (!ap_start) begin
@@ -193,10 +192,8 @@ module hbm_writer #(
 
     always @(posedge ap_clk or negedge ap_rst_n) begin
         if (!ap_rst_n) begin
-            saved_addr0 <= gmem_addr;           // 从控制接口获取初始地址
-            saved_addr1 <= gmem_addr + 64'h1000; // 动态计算第二地址
             saved_addr0 <= 0;
-            saved_addr1 <= 64'h8000_0000;
+            saved_addr1 <= 64'h0800_0000;
         end else begin
             if (write0_done)
                 saved_addr0 <= current_addr0;
@@ -205,6 +202,8 @@ module hbm_writer #(
         end
     end
 
+
+    //后面可能用得上
     wire [63:0] gmem_addr;
     wire [31:0] gmem_size;
 
@@ -213,8 +212,8 @@ module hbm_writer #(
         .DATA_WIDTH(C_M_AXI_GMEM_DATA_WIDTH),
         .ADDR_WIDTH(C_M_AXI_GMEM_ADDR_WIDTH),
         .BURST_LEN(16),
-        .MAX_ADDR0(64'h8000_0000),
-        .MAX_ADDR1(64'h1_0000_0000)
+        .MAX_ADDR0(64'h0800_0000),
+        .MAX_ADDR1(64'h1000_0000)
     ) writer_inst (
         .ap_clk(ap_clk),
         .ap_rst_n(ap_rst_n),

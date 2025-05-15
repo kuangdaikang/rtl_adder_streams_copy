@@ -1,0 +1,31 @@
+{
+    "ip_layout": {
+        "m_count": "3",
+        "m_ip_data": [
+            {
+                "m_type": "IP_KERNEL",
+                "m_int_enable": "1",
+                "m_interrupt_id": "1",
+                "m_ip_control": "AP_CTRL_HS",
+                "m_base_address": "0x1c010000",
+                "m_name": "hbm_writer:hbm_writer_1"
+            },
+            {
+                "m_type": "IP_KERNEL",
+                "m_int_enable": "1",
+                "m_interrupt_id": "0",
+                "m_ip_control": "AP_CTRL_HS",
+                "m_base_address": "0x1c020000",
+                "m_name": "krnl_adder_stage_rtl:krnl_adder_stage_rtl_1"
+            },
+            {
+                "m_type": "IP_KERNEL",
+                "m_int_enable": "1",
+                "m_interrupt_id": "2",
+                "m_ip_control": "AP_CTRL_HS",
+                "m_base_address": "0x1c030000",
+                "m_name": "krnl_input_stage_rtl:krnl_input_stage_rtl_1"
+            }
+        ]
+    }
+}

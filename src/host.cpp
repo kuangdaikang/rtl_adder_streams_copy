@@ -10,17 +10,6 @@
 #define INCR_VALUE 10
 
 
-// 控制寄存器地址
-constexpr uint64_t HBM_WRITER_CTRL_BASE = 0x1c010000;
-constexpr uint32_t INTERRUPT_OFFSET = 0x04;
-
-
-// 读取 interrupt 状态寄存器（通过 OpenCL AXI-Lite buffer）
-uint32_t read_interrupt_status(cl::CommandQueue& q, cl::Buffer& ctrl_buf) {
-    uint32_t value = 0;
-    q.enqueueReadBuffer(ctrl_buf, CL_TRUE, INTERRUPT_OFFSET, sizeof(value), &value);
-    return value;
-}
 
 int main(int argc, char** argv) {
     if (argc != 2) {
@@ -76,18 +65,24 @@ int main(int argc, char** argv) {
     OCL_CHECK(err, cl::Kernel krnl_input_stage(program, "krnl_input_stage_rtl", &err));
     OCL_CHECK(err, cl::Kernel krnl_hbm_writer(program, "hbm_writer", &err));
 
-    // 创建输入缓冲区（DDR）
+    // 创建输入缓冲区
+    cl_mem_ext_ptr_t in_ext;
+    in_ext.obj = source_input.data();
+    in_ext.param = 0;
+    in_ext.flags = XCL_MEM_TOPOLOGY | 2;  //  HBM[2]
+
     OCL_CHECK(err,cl::Buffer buffer_input(context,
-                            CL_MEM_USE_HOST_PTR | CL_MEM_READ_ONLY,
-                            vector_size_bytes,
-                            source_input.data(),
-                            &err));
+        CL_MEM_USE_HOST_PTR | CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX,
+        vector_size_bytes,
+        &in_ext,
+        &err));
+
 
     // 创建输出缓冲区（HBM）用于 hbm_writer 写入
     cl_mem_ext_ptr_t out_ext;
     out_ext.obj = source_hw_results.data();
     out_ext.param = 0;
-    out_ext.flags = 0 | XCL_MEM_TOPOLOGY | 0;  // 0 表示 HBM[0]
+    out_ext.flags = XCL_MEM_TOPOLOGY | 0;  // 0 表示 HBM[0]
 
     OCL_CHECK(err, cl::Buffer buffer_output(context,
                             CL_MEM_USE_HOST_PTR | CL_MEM_WRITE_ONLY | CL_MEM_EXT_PTR_XILINX,
@@ -95,15 +90,6 @@ int main(int argc, char** argv) {
                             &out_ext,
                             &err));
 
-
-    // 创建控制寄存器 buffer（AXI-Lite 地址空间映射）
-    cl_mem_ext_ptr_t ctrl_ext;
-    ctrl_ext.obj = nullptr;
-    ctrl_ext.param = 0;
-    ctrl_ext.flags = HBM_WRITER_CTRL_BASE;
-
-    OCL_CHECK(err,cl::Buffer ctrl_buf(context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX,
-                        4096, &ctrl_ext, &err));  // 无需 reinterpret_cast
 
 
 
@@ -116,7 +102,7 @@ int main(int argc, char** argv) {
     OCL_CHECK(err,krnl_adder_stage.setArg(1, DATA_SIZE)); 
 
     // 设置 hbm_writer 参数
-    uint32_t size = static_cast<uint32_t>(DATA_SIZE*4096);
+    uint32_t size = static_cast<uint32_t>(DATA_SIZE);
     OCL_CHECK(err, err = krnl_hbm_writer.setArg(0, buffer_output));      // gmem_addr
     OCL_CHECK(err, err = krnl_hbm_writer.setArg(1, size));        // gmem_size
 
